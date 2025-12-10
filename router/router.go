@@ -3,13 +3,14 @@ package router
 import (
 	"net/http"
 	"postit/api"
+	"postit/middleware"
 
 	"github.com/gorilla/mux"
 )
 
 func Router() *mux.Router {
 	router := mux.NewRouter()
-
+	router.Use(middleware.CORSMiddleware)
 	router.HandleFunc("/createuser", api.RegisterUser).Methods("POST")
 	router.HandleFunc("/login", api.LoginUser).Methods("POST")
 	router.HandleFunc("/logout", api.Logout).Methods("POST")
