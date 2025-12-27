@@ -20,5 +20,7 @@ func Router() *mux.Router {
 	router.HandleFunc("/allpost", api.SeeallPost).Methods("GET")
 	router.Handle("/alluserpost/{id}", api.Authmiddleware(http.HandlerFunc(api.Allpostuser))).Methods("GET")
 	router.HandleFunc("/updatephoto/{id}", api.UpdateUserPhoto).Methods("PATCH")
+	router.Handle("/user", api.Authmiddleware(http.HandlerFunc(api.Getcurruser))).Methods("GET")
+	router.HandleFunc("/post/{id}", api.Getonepost).Methods("GET")
 	return router
 }

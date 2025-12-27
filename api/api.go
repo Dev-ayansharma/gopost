@@ -131,6 +131,7 @@ func Authmiddleware(next http.Handler) http.Handler {
 }
 
 func LoginUser(w http.ResponseWriter, r *http.Request) {
+
 	w.Header().Set("Content-Type", "application/json")
 	var u model.User
 	json.NewDecoder(r.Body).Decode(&u)
@@ -160,15 +161,17 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 	})
 }
 func RegisterUser(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*") // or your frontend URL
-	w.Header().Set("Access-Control-Allow-Methods", "POST")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	w.Header().Set("Content-Type", "application/json")
 
 	var user model.User
 	_ = json.NewDecoder(r.Body).Decode(&user)
 	createduser, err := createuser(user)
 	if err != nil {
-		http.Error(w, "Failed to create user", http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": err.Error(),
+		})
 		return
 	}
 	json.NewEncoder(w).Encode(createduser)
@@ -263,27 +266,41 @@ func UploadLocal(r *http.Request, fieldName string, localDir string) (string, st
 
 func CreatePost(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-
+	err := r.ParseMultipartForm(10 << 20)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to parse form"})
+		return
+	}
 	title := r.FormValue("title")
 	content := r.FormValue("content")
 	if title == "" || content == "" {
-		http.Error(w, "Title or content required", http.StatusBadRequest)
+
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Title or content required"})
 		return
 	}
 
 	localPath, _, err := UploadLocal(r, "image", "assets/uploads")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
 	imageURL, err := UploadToCloudinary(localPath)
 	if err != nil {
-		http.Error(w, "Cloudinary upload failed", http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Cloudinary upload failed"})
 		return
 	}
 
-	userId := r.Context().Value("userId").(uint)
+	userId, ok := r.Context().Value("userId").(uint)
+	if !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": "User ID not found"})
+		return
+	}
 
 	post := model.Post{
 		Title:   title,
@@ -295,7 +312,8 @@ func CreatePost(w http.ResponseWriter, r *http.Request) {
 	result := db.DB.Create(&post)
 
 	if result.Error != nil {
-		log.Fatalf("Failed to create user: %v", result.Error)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": result.Error.Error()})
 	}
 
 	var fullPost model.Post
@@ -306,14 +324,21 @@ func CreatePost(w http.ResponseWriter, r *http.Request) {
 }
 
 func Updatepost(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*") // or your frontend URL
-	w.Header().Set("Access-Control-Allow-Methods", "PATCH")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	err := r.ParseMultipartForm(10 << 20)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to parse form"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
 	params := mux.Vars(r)
 	id := params["id"]
 	var post model.Post
 	if err := db.DB.First(&post, id).Error; err != nil {
-		http.Error(w, "Post not found", http.StatusNotFound)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 	var input model.Post
@@ -328,8 +353,7 @@ func Updatepost(w http.ResponseWriter, r *http.Request) {
 }
 
 func DeletePost(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*") // or your frontend URL
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+
 	w.Header().Set("Content-Type", "application/json")
 
 	params := mux.Vars(r)
@@ -337,8 +361,10 @@ func DeletePost(w http.ResponseWriter, r *http.Request) {
 	result := db.DB.Unscoped().Delete(&model.Post{}, id)
 
 	if result.Error != nil {
-		http.Error(w, "Failed to update post", http.StatusInternalServerError)
-		return
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": result.Error.Error(),
+		})
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -347,26 +373,38 @@ func DeletePost(w http.ResponseWriter, r *http.Request) {
 }
 
 func SeeallPost(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+
 	w.Header().Set("Content-Type", "application/json")
 	var posts []model.Post
 	result := db.DB.Find(&posts)
 
 	if result.Error != nil {
-		http.Error(w, "Failed to fetch all post", http.StatusInternalServerError)
-		return
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Failed to fetch all post",
+		})
 	}
 	json.NewEncoder(w).Encode(posts)
 }
 
 func Allpostuser(w http.ResponseWriter, r *http.Request) {
+
 	w.Header().Set("Content-Type", "application/json")
-	userid := r.Context().Value("userId").(uint)
+	userid, ok := r.Context().Value("userId").(uint)
+	if !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Failed to fetch all post",
+		})
+		return
+	}
 	var posts []model.Post
 	result := db.DB.Where("user_id = ?", userid).Find(&posts)
 	if result.Error != nil {
-		http.Error(w, "Failed to find post", http.StatusInternalServerError)
-		return
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Failed to fetch all post",
+		})
 	}
 
 	json.NewEncoder(w).Encode(posts)
@@ -374,6 +412,7 @@ func Allpostuser(w http.ResponseWriter, r *http.Request) {
 }
 
 func UpdateUserPhoto(w http.ResponseWriter, r *http.Request) {
+
 	w.Header().Set("Content-Type", "application/json")
 
 	params := mux.Vars(r)
@@ -389,8 +428,10 @@ func UpdateUserPhoto(w http.ResponseWriter, r *http.Request) {
 	// 2. Upload to Cloudinary
 	imageURL, err := UploadToCloudinary(localPath)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Cloudinary upload failed: %v", err), http.StatusInternalServerError)
-		return
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Failed to upload image to Cloudinary",
+		})
 	}
 
 	// 3. Update database
@@ -402,8 +443,10 @@ func UpdateUserPhoto(w http.ResponseWriter, r *http.Request) {
 
 	post.Image = imageURL
 	if err := db.DB.Save(&post).Error; err != nil {
-		http.Error(w, "Failed to update image in DB", http.StatusInternalServerError)
-		return
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Failed to update image in DB",
+		})
 	}
 
 	// 4. Response
@@ -411,4 +454,44 @@ func UpdateUserPhoto(w http.ResponseWriter, r *http.Request) {
 		"message": " photo updated successfully",
 		"Image":   imageURL,
 	})
+}
+
+func Getcurruser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	userid, ok := r.Context().Value("userId").(uint)
+	if !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Failed to fetch user details",
+		})
+		return
+	}
+	var user model.User
+	result := db.DB.First(&user, userid)
+	if result.Error != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Failed to fetch user details",
+		})
+	}
+	json.NewEncoder(w).Encode(user)
+}
+
+func Getonepost(w http.ResponseWriter, r *http.Request) {
+
+	w.Header().Set("Content-Type", "application/json")
+	params := mux.Vars(r)
+	id := params["id"]
+
+	var post model.Post
+	result := db.DB.First(&post, id)
+	if result.Error != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Failed to find post",
+		})
+	}
+
+	json.NewEncoder(w).Encode(post)
+
 }
